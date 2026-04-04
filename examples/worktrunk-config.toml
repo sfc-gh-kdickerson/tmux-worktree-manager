@@ -1,0 +1,7 @@
+# Example hooks for worktrunk config.toml
+
+[hooks.post-switch]
+tmux = "/Users/YOU/.tmux/plugins/tmux-worktree-manager/scripts/tmux-window.sh switch {{ worktree_path }} {{ branch | sanitize }}"
+
+[hooks.post-remove]
+tmux = "/Users/YOU/.tmux/plugins/tmux-worktree-manager/scripts/tmux-window.sh remove {{ worktree_path }}"
