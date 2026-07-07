@@ -6,33 +6,29 @@ source "$SCRIPT_DIR/options.sh"
 source "$SCRIPT_DIR/diagnostics.sh"
 
 FZF_CMD="$(opt_get '@tmux-worktree-manager-fzf-command' 'fzf')"
+BACKEND="$(opt_get '@tmux-worktree-manager-backend' 'worktrunk')"
 GH_ENABLED="$(opt_get '@tmux-worktree-manager-gh-prs' 'on')"
 CLAUDE_ENABLED="$(opt_get '@tmux-worktree-manager-claude-status' 'on')"
 PREVIEW_WIDTH="$(opt_get '@tmux-worktree-manager-preview-width' '60%')"
 NERD_FONT="$(opt_get '@tmux-worktree-manager-nerd-font' 'on')"
 
-ensure_cmd git 'required to read worktrees' || exit 0
+BACKEND_CMD="$SCRIPT_DIR/backend-${BACKEND}.sh"
+if [[ ! -x "$BACKEND_CMD" ]]; then
+    msg "tmux-worktree-manager: unknown backend '$BACKEND'"
+    exit 0
+fi
+
 ensure_cmd "$FZF_CMD" 'required for picker UI' || exit 0
 
-WT_CMD="$(opt_get '@tmux-worktree-manager-wt-command' 'wt')"
-ensure_cmd "$WT_CMD" 'required for worktrunk backend' || exit 0
-
-parse_worktrees() {
-    local cur_path=""
-    while IFS= read -r line; do
-        case "$line" in
-            "worktree "*)
-                cur_path="${line#worktree }"
-                ;;
-            "branch refs/heads/"*)
-                echo "${line#branch refs/heads/}	$cur_path"
-                ;;
-            "")
-                cur_path=""
-                ;;
-        esac
-    done < <(git worktree list --porcelain 2>/dev/null)
-}
+if [[ "$BACKEND" == "sf" ]]; then
+    SF_CMD="$(opt_get '@tmux-worktree-manager-sf-command' 'sf')"
+    ensure_cmd "$SF_CMD" 'required for sf backend' || exit 0
+    ensure_cmd jq 'required to parse sf worktree list' || exit 0
+else
+    ensure_cmd git 'required to read worktrees' || exit 0
+    WT_CMD="$(opt_get '@tmux-worktree-manager-wt-command' 'wt')"
+    ensure_cmd "$WT_CMD" 'required for worktrunk backend' || exit 0
+fi
 
 pr_cache_file() {
     local origin hash
@@ -78,9 +74,9 @@ lookup_pr() {
     awk -F'\t' -v b="$branch" '$1 == b { print $2 "\t" $3 "\t" $4; exit }' "$cache"
 }
 
-before="$(parse_worktrees)"
+before="$("$BACKEND_CMD" list 2>/dev/null || true)"
 [[ -n "$before" ]] || {
-    msg 'tmux-worktree-manager: no worktrees in this repository'
+    msg 'tmux-worktree-manager: no worktrees found'
     exit 0
 }
 
@@ -189,7 +185,7 @@ if [[ "$key" == 'ctrl-d' && -n "$selection" ]]; then
     fi
 
     [[ -n "$wt_path" ]] && "$SCRIPT_DIR/tmux-window.sh" remove "$wt_path" 2>/dev/null || true
-    "$SCRIPT_DIR/backend-worktrunk.sh" remove "$selection" "$force" 2>/dev/null || true
+    "$BACKEND_CMD" remove "$selection" "$force" 2>/dev/null || true
     exit 0
 fi
 
@@ -200,6 +196,14 @@ if [[ -z "$branch" ]]; then
     printf 'Yes\nNo' | command "$FZF_CMD" --ansi --no-multi \
         --prompt="Create '$query'? > " --header='Create new worktree?' 2>/dev/null | grep -q '^Yes$' || exit 0
 
+    if [[ "$BACKEND" == "sf" ]]; then
+        # sf has no base-branch concept; create over the current repo, then switch.
+        "$BACKEND_CMD" create "$query" 2>/dev/null || exit 0
+        sf_path="$("$BACKEND_CMD" path "$query" 2>/dev/null || true)"
+        [[ -n "$sf_path" ]] && "$SCRIPT_DIR/tmux-window.sh" switch "$sf_path" "$query" 2>/dev/null || true
+        exit 0
+    fi
+
     default_branch="$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')"
     [[ -n "$default_branch" ]] || default_branch='main'
     base="$(git branch --format='%(refname:short)' 2>/dev/null | command "$FZF_CMD" \
@@ -207,8 +211,14 @@ if [[ -z "$branch" ]]; then
         --query="$default_branch" --no-multi 2>/dev/null || true)"
 
     [[ -n "$base" ]] || exit 0
-    "$SCRIPT_DIR/backend-worktrunk.sh" create "$query" "$base" 2>/dev/null || exit 0
+    "$BACKEND_CMD" create "$query" "$base" 2>/dev/null || exit 0
     exit 0
 fi
 
-"$SCRIPT_DIR/backend-worktrunk.sh" switch "$branch" 2>/dev/null || exit 0
+if [[ "$BACKEND" == "sf" ]]; then
+    # sf has no switch verb; resolve the path and drive the tmux window ourselves.
+    sf_path="$(awk -F'\t' -v b="$branch" '$1 == b { print $2; exit }' <<< "$before")"
+    [[ -n "$sf_path" ]] && "$SCRIPT_DIR/tmux-window.sh" switch "$sf_path" "$branch" 2>/dev/null || true
+else
+    "$BACKEND_CMD" switch "$branch" 2>/dev/null || exit 0
+fi

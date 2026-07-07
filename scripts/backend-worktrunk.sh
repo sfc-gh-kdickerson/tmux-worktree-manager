@@ -10,6 +10,16 @@ WT_CMD="$(opt_get '@tmux-worktree-manager-wt-command' 'wt')"
 action="${1:-}"
 
 case "$action" in
+    list)
+        cur_path=""
+        while IFS= read -r line; do
+            case "$line" in
+                "worktree "*)          cur_path="${line#worktree }" ;;
+                "branch refs/heads/"*) echo "${line#branch refs/heads/}"$'\t'"$cur_path" ;;
+                "")                    cur_path="" ;;
+            esac
+        done < <(git worktree list --porcelain 2>/dev/null)
+        ;;
     switch)
         branch="${2:-}"
         [[ -n "$branch" ]] || exit 1
