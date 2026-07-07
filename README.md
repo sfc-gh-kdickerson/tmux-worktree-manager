@@ -51,6 +51,7 @@ set -g @tmux-worktree-manager-preview-width '60%'
 set -g @tmux-worktree-manager-backend 'worktrunk'
 set -g @tmux-worktree-manager-wt-command 'wt'
 set -g @tmux-worktree-manager-sf-command 'sf'
+set -g @tmux-worktree-manager-sf-scope 'repo'
 set -g @tmux-worktree-manager-fzf-command 'fzf'
 
 set -g @tmux-worktree-manager-gh-prs 'on'
@@ -79,6 +80,10 @@ set -g @tmux-worktree-manager-backend 'sf'
 
 - **Global named workspaces** (not per-repo git worktrees), listed via `sf worktree list --json`
   (requires `jq`). Each row is a workspace **name** mapped to its repo path.
+- **Scoped to the current repo by default.** Because `sf worktree list` is global (unlike
+  `git worktree list`), the picker filters to workspaces containing the repo you opened it from
+  (matched against the git toplevel's basename). Set `@tmux-worktree-manager-sf-scope 'all'` to
+  show every workspace regardless of cwd. When launched outside a git repo, all are shown.
 - `sf` has no tmux integration, so the plugin drives tmux windows itself via
   `scripts/tmux-window.sh`.
 - Create takes **no base branch** — `sf` overlays existing checkouts (`sf worktree create <name>
